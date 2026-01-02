@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:convert'; // ВАЖНО: нужно для utf8
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 
@@ -25,16 +25,18 @@ void onStart(ServiceInstance service) async {
         positionGravity: PositionGravity.none,
       );
 
-      // Пауза, чтобы оверлей и анимация успели инициализироваться
+      // Пауза для инициализации движка оверлея
       await Future.delayed(const Duration(milliseconds: 300));
     }
 
+    // Отправляем данные в OverlayToastWidget
     await FlutterOverlayWindow.shareData(message);
   }
 
   ServerSocket? serverSocket;
 
   try {
+    // Слушаем только localhost (безопасность), порт 11111
     serverSocket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 11111);
     print('TCP Сервер успешно запущен на порту 11111');
 
@@ -45,31 +47,58 @@ void onStart(ServiceInstance service) async {
       );
     }
 
+    // Уведомление при старте самого сервиса
     await Future.delayed(const Duration(milliseconds: 500));
-    await showOverlayNotification("Сервер запущен! Порт 11111 🟢");
+    // Это сообщение системное, его показываем в тосте
+    await showOverlayNotification("Сервер запущен! Жду игру... 🟢");
 
     serverSocket.listen((Socket client) {
-      print('Новый клиент: ${client.remoteAddress.address}');
+      print('Новый клиент (Игра): ${client.remoteAddress.address}');
 
       client.listen(
             (List<int> data) {
-          // ИСПРАВЛЕНИЕ: Декодируем байты как UTF-8, чтобы смайлики работали
-          final message = utf8.decode(data).trim();
-          print('Получено: $message');
+          // 1. Декодируем входящие байты
+          final rawMessage = utf8.decode(data).trim();
 
-          showOverlayNotification("Получено: $message 📩");
+          // 2. Всегда пишем в консоль (Logcat/Debug Console) всё подряд
+          // Это нужно, чтобы ты видел технические логи (OUT_JSON, HEX и т.д.)
+          print('TCP IN: $rawMessage');
+
+          // 3. ФИЛЬТРАЦИЯ ДЛЯ ТОСТОВ
+          // В C++ мы пометили технические логи эмодзи 🚀 (исходящие) и 📥 (входящие).
+          // Сообщения "Инъекция успешна" и т.д. идут без этих префиксов (или с другими).
+
+          bool isTechnicalLog = rawMessage.startsWith('🚀') || // Исходящие JSON
+              rawMessage.startsWith('📥') || // Входящие байты
+              rawMessage.startsWith('HEX:') ||
+              rawMessage.startsWith('TXT:');
+
+          if (isTechnicalLog) {
+            // Это технический лог -> в оверлей НЕ отправляем.
+            // Мы его уже вывели в print выше.
+            return;
+          }
+
+          // 4. Если это НЕ технический лог, показываем пользователю Toast
+          showOverlayNotification(rawMessage);
         },
-        onError: (e) => client.close(),
-        onDone: () => client.close(),
+        onError: (e) {
+          print("Ошибка клиента: $e");
+          client.close();
+        },
+        onDone: () {
+          print("Клиент отключился");
+          client.close();
+        },
       );
     });
   } on SocketException catch (e) {
     print('Ошибка сокета: $e');
-    String errorMsg = "Ошибка запуска сервера ⚠️";
+    String errorMsg = "Ошибка порта 11111 ⚠️";
 
     if (e.osError != null &&
         (e.osError!.errorCode == 98 || e.osError!.errorCode == 48)) {
-      errorMsg = "Порт 11111 занят! Хуйня вышла 🤬";
+      errorMsg = "Порт 11111 занят! Перезагрузи мобилу 🤬";
     }
 
     if (service is AndroidServiceInstance) {
@@ -81,7 +110,7 @@ void onStart(ServiceInstance service) async {
 
     await showOverlayNotification(errorMsg);
   } catch (e) {
-    await showOverlayNotification("Неведомая ошибка: $e 💀");
+    await showOverlayNotification("Критическая ошибка: $e 💀");
   }
 
   service.on('stopService').listen((event) async {

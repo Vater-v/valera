@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:collection'; // Для Queue
+import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
-import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_colors.dart'; // Убедись, что путь к цветам верный
 
 class OverlayToastWidget extends StatefulWidget {
   const OverlayToastWidget({super.key});
@@ -15,15 +15,12 @@ class _OverlayToastWidgetState extends State<OverlayToastWidget> {
   final Queue<String> _messageQueue = Queue();
   String _currentMessage = "";
   bool _isProcessing = false;
-
-  // Управление прозрачностью для анимации
   double _opacity = 0.0;
 
   @override
   void initState() {
     super.initState();
 
-    // Слушаем входящие сообщения
     FlutterOverlayWindow.overlayListener.listen((event) {
       if (!mounted) return;
 
@@ -36,6 +33,7 @@ class _OverlayToastWidgetState extends State<OverlayToastWidget> {
         newMessage = event.toString();
       }
 
+      // Добавляем в очередь
       _messageQueue.add(newMessage);
 
       if (!_isProcessing) {
@@ -52,42 +50,35 @@ class _OverlayToastWidgetState extends State<OverlayToastWidget> {
 
       final msg = _messageQueue.removeFirst();
 
-      // 1. Подготовка: ставим текст, прозрачность 0
+      // Сброс состояния
       setState(() {
         _currentMessage = msg;
         _opacity = 0.0;
       });
+      await Future.delayed(const Duration(milliseconds: 50));
 
-      // Техническая пауза
+      // FADE IN (Появление)
+      if (mounted) setState(() => _opacity = 1.0);
+      await Future.delayed(const Duration(milliseconds: 300)); // Быстрое появление
+
+      // SHOW (Показ)
+      // Держим сообщение 2.5 секунды, чтобы успеть прочитать
+      await Future.delayed(const Duration(milliseconds: 2500));
+
+      if (!mounted) break;
+
+      // FADE OUT (Исчезновение)
+      if (mounted) setState(() => _opacity = 0.0);
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // Небольшая пауза перед следующим сообщением
       await Future.delayed(const Duration(milliseconds: 100));
-      if (!mounted) break;
-
-      // 2. FADE IN: Появляемся
-      setState(() {
-        _opacity = 1.0;
-      });
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // 3. SHOW: Показываем сообщение (3 сек)
-      await Future.delayed(const Duration(seconds: 3));
-      if (!mounted) break;
-
-      // 4. FADE OUT: Исчезаем
-      setState(() {
-        _opacity = 0.0;
-      });
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // 5. PAUSE: Пауза между сообщениями
-      await Future.delayed(const Duration(milliseconds: 200));
     }
 
     _isProcessing = false;
 
-    // Если очередь пуста - закрываем оверлей
-    if (mounted) {
-      await FlutterOverlayWindow.closeOverlay();
-    }
+    // Не закрываем оверлей полностью, чтобы он был готов принять новые сообщения мгновенно
+    // Но можно и закрыть: await FlutterOverlayWindow.closeOverlay();
   }
 
   @override
@@ -98,42 +89,37 @@ class _OverlayToastWidgetState extends State<OverlayToastWidget> {
         alignment: Alignment.bottomCenter,
         child: AnimatedOpacity(
           opacity: _opacity,
-          duration: const Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
           child: Container(
-            margin: const EdgeInsets.only(bottom: 150, left: 16, right: 16),
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            // Отступ снизу, чтобы не перекрывать навигационную панель игры
+            margin: const EdgeInsets.only(bottom: 120, left: 20, right: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.9),
-              borderRadius: BorderRadius.circular(16),
+              color: const Color(0xFF1E1E1E).withOpacity(0.95), // Почти черный фон
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: const Color(0xFFFF453A).withOpacity(0.8), // Красная обводка Valera
+                  width: 1.5
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.5),
-                  blurRadius: 15,
+                  color: Colors.black.withOpacity(0.6),
+                  blurRadius: 10,
                   offset: const Offset(0, 4),
                 )
               ],
-              border: Border.all(
-                  color: AppColors.primaryRed.withOpacity(0.6), width: 1.5),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // ИКОНКА УБРАНА ОТСЮДА
-                Flexible(
-                  child: Text(
-                    _currentMessage,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: AppColors.textPrimary,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      decoration: TextDecoration.none,
-                    ),
-                  ),
-                ),
-              ],
+            child: Text(
+              _currentMessage,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                decoration: TextDecoration.none,
+                fontFamily: 'Roboto',
+              ),
             ),
           ),
         ),
