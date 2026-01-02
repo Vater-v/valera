@@ -96,6 +96,7 @@ void onStart(ServiceInstance service) async {
         if (decoded.isEmpty) return;
 
         bool forwardToRemote = true;
+        String messageToSend = decoded;
 
         // А) Команда для Оверлея
         if (decoded.startsWith("TOAST:")) {
@@ -105,17 +106,24 @@ void onStart(ServiceInstance service) async {
         }
         // Б) Перехваченные данные (JSON и прочее)
         else if (decoded.startsWith("🎯")) {
-          // Пишем в лог (видно через flutter logs), но НЕ СПАМИМ в оверлей
+          // Пишем в лог для отладки
           print("HOOK DATA: $decoded");
 
-          // forwardToRemote остается true -> уйдет на сервер
+          // Очищаем от смайлика и лишних пробелов для отправки чистого JSON
+          messageToSend = decoded.replaceFirst("🎯", "").trim();
         }
 
-        // В) Пересылка на удаленный сервер
+        // В) Фильтр по длине (менее 40 символов не шлем)
+        // Это отсечет короткий мусор и пустые JSON, если они есть
+        if (messageToSend.length < 40) {
+          forwardToRemote = false;
+        }
+
+        // Г) Пересылка на удаленный сервер
         if (forwardToRemote && isRemoteConnected && remoteSocket != null) {
           try {
             // Восстанавливаем перенос строки, так как LineSplitter его убрал
-            remoteSocket.write("$decoded\n");
+            remoteSocket.write("$messageToSend\n");
           } catch (_) {}
         }
       },
