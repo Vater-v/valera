@@ -19,17 +19,11 @@ class _OverlayToastWidgetState extends State<OverlayToastWidget> {
   @override
   void initState() {
     super.initState();
-    // Слушаем входящие сообщения от сервиса
     FlutterOverlayWindow.overlayListener.listen((event) {
       if (!mounted) return;
-
-      String msg = "";
-      if (event is String) {
-        msg = event;
-      } else if (event is Map && event['message'] != null) {
+      String msg = event.toString();
+      if (event is Map && event['message'] != null) {
         msg = event['message'].toString();
-      } else {
-        msg = event.toString();
       }
 
       if (msg.isNotEmpty) {
@@ -49,34 +43,28 @@ class _OverlayToastWidgetState extends State<OverlayToastWidget> {
 
       final msg = _messageQueue.removeFirst();
 
-      // Если предыдущее сообщение еще висит (хотя мы скрываем его ниже),
-      // делаем небольшую паузу для плавности анимации скрытия
       if (_isVisible) {
         setState(() => _isVisible = false);
-        await Future.delayed(const Duration(milliseconds: 150));
+        await Future.delayed(const Duration(milliseconds: 200));
       }
 
       if (!mounted) break;
 
-      // Показываем новое сообщение
       setState(() {
         _currentMessage = msg;
         _isVisible = true;
       });
 
-      // Ждем, пока пользователь прочитает (динамическое время: минимум 2с, максимум 5с)
-      // Чем длиннее текст, тем дольше висит
-      int durationMs = 2000 + (msg.length * 40);
+      // Расчет времени показа
+      int durationMs = 2000 + (msg.length * 50);
       if (durationMs > 5000) durationMs = 5000;
 
       await Future.delayed(Duration(milliseconds: durationMs));
+    }
 
-      // Скрываем перед следующим
-      if (mounted) {
-        setState(() => _isVisible = false);
-        // Время на анимацию исчезновения
-        await Future.delayed(const Duration(milliseconds: 300));
-      }
+    if (mounted) {
+      setState(() => _isVisible = false);
+      await Future.delayed(const Duration(milliseconds: 300));
     }
 
     _isProcessing = false;
@@ -87,55 +75,38 @@ class _OverlayToastWidgetState extends State<OverlayToastWidget> {
     return Material(
       type: MaterialType.transparency,
       child: Stack(
+        alignment: Alignment.bottomCenter,
         children: [
-          // Мы используем Align/Positioned, чтобы позиционировать тост внизу экрана
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOutBack,
-            bottom: _isVisible ? 50 : -150, // Выезжает снизу
-            left: 20,
-            right: 20,
-            child: Center(
+          AnimatedSlide(
+            offset: _isVisible ? const Offset(0, 0) : const Offset(0, 2.0),
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeOutQuart,
+            child: AnimatedOpacity(
+              opacity: _isVisible ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
               child: Container(
-                constraints: const BoxConstraints(maxWidth: 400),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                margin: const EdgeInsets.only(bottom: 60, left: 32, right: 32),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E1E).withOpacity(0.90), // Темный фон
-                  borderRadius: BorderRadius.circular(16),
+                  color: const Color(0xFF121212).withOpacity(0.92), // Темный фон
+                  borderRadius: BorderRadius.circular(50), // Полная капсула
                   border: Border.all(
-                    color: const Color(0xFFFF453A).withOpacity(0.5), // Красная обводка
+                    color: Colors.white.withOpacity(0.08),
                     width: 1,
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.5),
-                      blurRadius: 15,
-                      offset: const Offset(0, 4),
-                    )
-                  ],
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Иконка (показываем специальную иконку для хука мишени)
-                    if (_currentMessage.startsWith("🎯"))
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 4),
-                        child: Icon(Icons.data_object, color: Color(0xFFFF453A), size: 20),
-                      ),
-                    Text(
-                      _currentMessage,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        fontFamily: 'Roboto',
-                        height: 1.3,
-                        decoration: TextDecoration.none,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  _currentMessage.replaceAll("TOAST:", "").replaceAll("", "").trim(),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFFF2F2F2),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    fontFamily: 'Roboto',
+                    height: 1.3,
+                    decoration: TextDecoration.none,
+                  ),
                 ),
               ),
             ),

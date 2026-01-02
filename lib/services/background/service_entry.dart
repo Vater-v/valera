@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 void onStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
 
-  // --- 1. ЗАГРУЗКА НАСТРОЕК (IP:PORT) ---
+  // --- 1. ЗАГРУЗКА НАСТРОЕК ---
   final prefs = await SharedPreferences.getInstance();
   final String? savedIpPort = prefs.getString('saved_ip_port');
   String? targetHost;
@@ -24,11 +24,8 @@ void onStart(ServiceInstance service) async {
     }
   }
 
-  print("Configured Target: $targetHost:$targetPort");
-
   /// Хелпер для отправки сообщений в оверлей
   Future<void> showOverlayNotification(String message) async {
-    // Проверяем активность оверлея, если нет - создаем
     bool isActive = await FlutterOverlayWindow.isActive();
     if (!isActive) {
       await FlutterOverlayWindow.showOverlay(
@@ -36,155 +33,91 @@ void onStart(ServiceInstance service) async {
         height: WindowSize.matchParent,
         width: WindowSize.matchParent,
         alignment: OverlayAlignment.bottomCenter,
-        flag: OverlayFlag.clickThrough, // Важно: клики проходят сквозь оверлей в игру
+        flag: OverlayFlag.clickThrough,
         visibility: NotificationVisibility.visibilityPublic,
       );
-      // Небольшая пауза для инициализации окна
-      await Future.delayed(const Duration(milliseconds: 300));
+      await Future.delayed(const Duration(milliseconds: 200));
     }
-    // Отправляем данные в оверлей
     await FlutterOverlayWindow.shareData(message);
   }
 
   ServerSocket? serverSocket;
 
   try {
-    // Слушаем localhost:11111
     serverSocket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 11111);
-    print('TCP Прокси-сервер запущен на порту 11111');
 
     if (service is AndroidServiceInstance) {
-      String statusText = 'Сервер активен (Port: 11111)';
-      if (targetHost != null) {
-        statusText += ' -> $targetHost:$targetPort';
-      }
-
       service.setForegroundNotificationInfo(
-        title: 'Valera Hmuriy',
-        content: statusText,
+        title: 'Valera Service',
+        content: 'Active on 11111',
       );
     }
 
     await Future.delayed(const Duration(milliseconds: 500));
-
-    if (targetHost != null && targetPort != null) {
-      await showOverlayNotification("Режим PROXY: $targetHost:$targetPort 🚀");
-    } else {
-      await showOverlayNotification("Режим SINK (Логи + Хуки) 🛡️");
-    }
+    // Приветственное сообщение
+    await showOverlayNotification("TOAST: Valera Ready 🚀");
 
     serverSocket.listen((Socket client) async {
-      print('Новое подключение: ${client.remoteAddress.address}');
-
       Socket? remoteSocket;
       bool isConnectedToRemote = false;
 
-      // --- 2. ПОДКЛЮЧЕНИЕ К УДАЛЕННОМУ СЕРВЕРУ (ТОЛЬКО ЕСЛИ НУЖНО) ---
-      // Мы подключаемся к удаленному серверу, только если настроен прокси
+      // --- 2. ПРОКСИ (ЕСЛИ НАСТРОЕН) ---
       if (targetHost != null && targetPort != null) {
         try {
-          remoteSocket = await Socket.connect(targetHost, targetPort, timeout: const Duration(seconds: 5));
+          remoteSocket = await Socket.connect(targetHost, targetPort, timeout: const Duration(seconds: 3));
           isConnectedToRemote = true;
-          print('Успешное подключение к удаленному серверу!');
 
-          // Слушаем ответ от удаленного сервера и шлем обратно клиенту (игре)
           remoteSocket.listen(
                 (List<int> data) {
-              try {
-                client.add(data);
-                // print('REMOTE -> CLIENT (${data.length} bytes)');
-              } catch (e) {
-                print('Ошибка отправки клиенту: $e');
-              }
+              try { client.add(data); } catch (_) {}
             },
-            onDone: () {
-              print("Удаленный сервер закрыл соединение");
-              client.destroy();
-            },
-            onError: (e) {
-              print("Ошибка удаленного сокета: $e");
-              client.destroy();
-            },
+            onDone: () { client.destroy(); },
+            onError: (e) { client.destroy(); },
           );
         } catch (e) {
-          print("Не удалось подключиться к целевому серверу: $e");
-          showOverlayNotification("Ошибка подключения к серверу! 🔌");
+          // Ошибки подключения тоже можно слать как TOAST, если нужно
+          // showOverlayNotification("TOAST: Proxy Error");
         }
       }
 
-      // --- 3. ОБРАБОТКА ДАННЫХ ОТ КЛИЕНТА (ИГРА ИЛИ C++ МОДУЛЬ) ---
+      // --- 3. ОБРАБОТКА ДАННЫХ ---
       client.listen(
             (List<int> data) {
-          // Попытка декодировать сообщение
           String? decodedMessage;
           try {
             decodedMessage = utf8.decode(data, allowMalformed: true).trim();
           } catch (_) {}
 
-          // --- ЛОГИКА ФИЛЬТРАЦИИ ---
           bool isInternalCommand = false;
 
           if (decodedMessage != null && decodedMessage.isNotEmpty) {
-            // 1. КОМАНДА TOAST (Специфично для C++ модуля)
-            // Формат C++: TcpClient::Send("TOAST: Текст сообщения");
+
+            // 1. ТОЛЬКО TOAST ПОПАДАЕТ В ОВЕРЛЕЙ
             if (decodedMessage.startsWith("TOAST:")) {
               isInternalCommand = true;
-              final msg = decodedMessage.substring(6).trim(); // Убираем 'TOAST:'
-              showOverlayNotification("🔔 $msg");
+              final msg = decodedMessage.substring(6).trim();
+              showOverlayNotification(msg);
             }
-            // 2. ДАННЫЕ ИЗ ХУКА (JSON с мишенью)
-            // Формат C++: TcpClient::Send("🎯 " + json);
+            // 2. ХУКИ (🎯) ГЛУШИМ (не показываем, не шлем на сервер)
             else if (decodedMessage.startsWith("🎯")) {
               isInternalCommand = true;
-              showOverlayNotification(decodedMessage);
+              // Тут пусто -> просто игнорируем
             }
           }
 
-          // --- ПЕРЕСЫЛКА ---
-          // Если это НЕ внутренняя команда Valera (TOAST или Хук),
-          // то это скорее всего реальный игровой трафик -> шлем на сервер.
-          if (!isInternalCommand) {
-            if (isConnectedToRemote && remoteSocket != null) {
-              try {
-                remoteSocket.add(data);
-              } catch (e) {
-                print("Ошибка отправки на удаленный сервер: $e");
-              }
-            }
-
-            // --- СНИФФИНГ ОБЫЧНОГО ТРАФИКА ---
-            // Пытаемся показать обычные текстовые пакеты, если это не бинарщина
-            if (decodedMessage != null) {
-              bool isTechnicalLog = decodedMessage.startsWith('🚀') ||
-                  decodedMessage.startsWith('📥') ||
-                  decodedMessage.startsWith('HEX:') ||
-                  decodedMessage.startsWith('TXT:');
-
-              if (!isTechnicalLog && decodedMessage.length > 1) {
-                // Ограничиваем длину вывода обычного трафика
-                String display = decodedMessage.length > 100
-                    ? "${decodedMessage.substring(0, 100)}..."
-                    : decodedMessage;
-                showOverlayNotification(display);
-              }
-            }
+          // Пересылка трафика (если это не Toast и не Хук)
+          if (!isInternalCommand && isConnectedToRemote && remoteSocket != null) {
+            try {
+              remoteSocket.add(data);
+            } catch (_) {}
           }
         },
-        onError: (e) {
-          print("Ошибка клиента: $e");
-          remoteSocket?.destroy();
-        },
-        onDone: () {
-          print("Клиент отключился");
-          remoteSocket?.destroy();
-        },
+        onError: (e) { remoteSocket?.destroy(); },
+        onDone: () { remoteSocket?.destroy(); },
       );
     });
-  } on SocketException catch (e) {
-    print('Ошибка сокета: $e');
-    await showOverlayNotification("Порт 11111 занят! 🤬");
   } catch (e) {
-    await showOverlayNotification("Критическая ошибка: $e 💀");
+    print("Error: $e");
   }
 
   service.on('stopService').listen((event) async {
