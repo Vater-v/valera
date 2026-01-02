@@ -50,7 +50,7 @@ void onStart(ServiceInstance service) async {
     // Уведомление при старте самого сервиса
     await Future.delayed(const Duration(milliseconds: 500));
     // Это сообщение системное, его показываем в тосте
-    await showOverlayNotification("Сервер запущен! Жду игру... 🟢");
+    //await showOverlayNotification("Сервер запущен! Жду игру... 🟢");
 
     serverSocket.listen((Socket client) {
       print('Новый клиент (Игра): ${client.remoteAddress.address}');
