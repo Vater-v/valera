@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert'; // ВАЖНО: нужно для utf8
 import 'dart:io';
 import 'dart:ui';
 
@@ -11,40 +12,32 @@ void onStart(ServiceInstance service) async {
 
   /// Хелпер для отправки сообщений в оверлей
   Future<void> showOverlayNotification(String message) async {
-    // Проверяем, активно ли окно
     bool isActive = await FlutterOverlayWindow.isActive();
 
     if (!isActive) {
-      // Если окно не активно, создаем его
       await FlutterOverlayWindow.showOverlay(
         enableDrag: false,
-        height: 500, // Высота области (не самого виджета, а контейнера)
+        height: 500,
         width: WindowSize.matchParent,
         alignment: OverlayAlignment.bottomCenter,
-        flag: OverlayFlag.focusPointer, // Пропускаем клики мимо
+        flag: OverlayFlag.focusPointer,
         visibility: NotificationVisibility.visibilityPublic,
         positionGravity: PositionGravity.none,
       );
 
-      // ВАЖНО: Даем небольшую паузу (250мс), чтобы изолят оверлея успел подняться
-      // перед тем, как мы отправим в него данные.
-      await Future.delayed(const Duration(milliseconds: 250));
+      // Пауза, чтобы оверлей и анимация успели инициализироваться
+      await Future.delayed(const Duration(milliseconds: 300));
     }
 
-    // Отправляем сообщение. Благодаря очереди в OverlayToastWidget,
-    // оно встанет в очередь, а не перезапишет предыдущее.
     await FlutterOverlayWindow.shareData(message);
   }
 
   ServerSocket? serverSocket;
 
   try {
-    // Пытаемся занять порт
     serverSocket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 11111);
-
     print('TCP Сервер успешно запущен на порту 11111');
 
-    // Обновляем системное уведомление (шторка)
     if (service is AndroidServiceInstance) {
       service.setForegroundNotificationInfo(
         title: 'Valera Hmuriy',
@@ -52,22 +45,18 @@ void onStart(ServiceInstance service) async {
       );
     }
 
-    // ВАЖНО: Делаем паузу перед отправкой уведомления об успехе.
-    // Это нужно, чтобы оверлей, вызванный из UI (HomePage), точно успел загрузиться.
     await Future.delayed(const Duration(milliseconds: 500));
-
     await showOverlayNotification("Сервер запущен! Порт 11111 🟢");
 
-    // Логика работы с клиентами
     serverSocket.listen((Socket client) {
       print('Новый клиент: ${client.remoteAddress.address}');
 
       client.listen(
             (List<int> data) {
-          final message = String.fromCharCodes(data).trim();
+          // ИСПРАВЛЕНИЕ: Декодируем байты как UTF-8, чтобы смайлики работали
+          final message = utf8.decode(data).trim();
           print('Получено: $message');
 
-          // Отправляем входящее сообщение в тост
           showOverlayNotification("Получено: $message 📩");
         },
         onError: (e) => client.close(),
@@ -75,11 +64,9 @@ void onStart(ServiceInstance service) async {
       );
     });
   } on SocketException catch (e) {
-    // ОШИБКА СОКЕТА (например, порт занят)
     print('Ошибка сокета: $e');
     String errorMsg = "Ошибка запуска сервера ⚠️";
 
-    // Проверка кодов ошибок (98 или 48 обычно означают EADDRINUSE)
     if (e.osError != null &&
         (e.osError!.errorCode == 98 || e.osError!.errorCode == 48)) {
       errorMsg = "Порт 11111 занят! Хуйня вышла 🤬";
@@ -93,25 +80,13 @@ void onStart(ServiceInstance service) async {
     }
 
     await showOverlayNotification(errorMsg);
-
-    // Опционально: можно убить сервис, если старт не удался
-    // service.stopSelf();
   } catch (e) {
-    // Любая другая ошибка
     await showOverlayNotification("Неведомая ошибка: $e 💀");
   }
 
-  // Слушаем команду остановки из UI (кнопка "ВЫКЛЮЧИТЬ")
   service.on('stopService').listen((event) async {
     await serverSocket?.close();
-
-    // Обновляем уведомление перед закрытием
-    //await showOverlayNotification("Сервис остановлен 🛑");
-
-    // Даем 2 секунды, чтобы тост успел появиться и отработать в очереди,
-    // прежде чем процесс умрет
     await Future.delayed(const Duration(seconds: 2));
-
     service.stopSelf();
   });
 }
