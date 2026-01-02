@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
-import '../../core/theme/app_colors.dart'; // Убедись, что путь к цветам верный
 
 class OverlayToastWidget extends StatefulWidget {
   const OverlayToastWidget({super.key});
@@ -14,30 +13,30 @@ class OverlayToastWidget extends StatefulWidget {
 class _OverlayToastWidgetState extends State<OverlayToastWidget> {
   final Queue<String> _messageQueue = Queue();
   String _currentMessage = "";
+  bool _isVisible = false;
   bool _isProcessing = false;
-  double _opacity = 0.0;
 
   @override
   void initState() {
     super.initState();
-
+    // Слушаем входящие сообщения от сервиса
     FlutterOverlayWindow.overlayListener.listen((event) {
       if (!mounted) return;
 
-      String newMessage = "";
+      String msg = "";
       if (event is String) {
-        newMessage = event;
+        msg = event;
       } else if (event is Map && event['message'] != null) {
-        newMessage = event['message'].toString();
+        msg = event['message'].toString();
       } else {
-        newMessage = event.toString();
+        msg = event.toString();
       }
 
-      // Добавляем в очередь
-      _messageQueue.add(newMessage);
-
-      if (!_isProcessing) {
-        _processQueue();
+      if (msg.isNotEmpty) {
+        _messageQueue.add(msg);
+        if (!_isProcessing) {
+          _processQueue();
+        }
       }
     });
   }
@@ -50,79 +49,98 @@ class _OverlayToastWidgetState extends State<OverlayToastWidget> {
 
       final msg = _messageQueue.removeFirst();
 
-      // Сброс состояния
-      setState(() {
-        _currentMessage = msg;
-        _opacity = 0.0;
-      });
-      await Future.delayed(const Duration(milliseconds: 50));
-
-      // FADE IN (Появление)
-      if (mounted) setState(() => _opacity = 1.0);
-      await Future.delayed(const Duration(milliseconds: 300)); // Быстрое появление
-
-      // SHOW (Показ)
-      // Держим сообщение 2.5 секунды, чтобы успеть прочитать
-      await Future.delayed(const Duration(milliseconds: 2500));
+      // Если предыдущее сообщение еще висит (хотя мы скрываем его ниже),
+      // делаем небольшую паузу для плавности анимации скрытия
+      if (_isVisible) {
+        setState(() => _isVisible = false);
+        await Future.delayed(const Duration(milliseconds: 150));
+      }
 
       if (!mounted) break;
 
-      // FADE OUT (Исчезновение)
-      if (mounted) setState(() => _opacity = 0.0);
-      await Future.delayed(const Duration(milliseconds: 300));
+      // Показываем новое сообщение
+      setState(() {
+        _currentMessage = msg;
+        _isVisible = true;
+      });
 
-      // Небольшая пауза перед следующим сообщением
-      await Future.delayed(const Duration(milliseconds: 100));
+      // Ждем, пока пользователь прочитает (динамическое время: минимум 2с, максимум 5с)
+      // Чем длиннее текст, тем дольше висит
+      int durationMs = 2000 + (msg.length * 40);
+      if (durationMs > 5000) durationMs = 5000;
+
+      await Future.delayed(Duration(milliseconds: durationMs));
+
+      // Скрываем перед следующим
+      if (mounted) {
+        setState(() => _isVisible = false);
+        // Время на анимацию исчезновения
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
     }
 
     _isProcessing = false;
-
-    // Не закрываем оверлей полностью, чтобы он был готов принять новые сообщения мгновенно
-    // Но можно и закрыть: await FlutterOverlayWindow.closeOverlay();
   }
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.transparent,
-      child: Align(
-        alignment: Alignment.bottomCenter,
-        child: AnimatedOpacity(
-          opacity: _opacity,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-          child: Container(
-            // Отступ снизу, чтобы не перекрывать навигационную панель игры
-            margin: const EdgeInsets.only(bottom: 120, left: 20, right: 20),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E1E).withOpacity(0.95), // Почти черный фон
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                  color: const Color(0xFFFF453A).withOpacity(0.8), // Красная обводка Valera
-                  width: 1.5
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.6),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                )
-              ],
-            ),
-            child: Text(
-              _currentMessage,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                decoration: TextDecoration.none,
-                fontFamily: 'Roboto',
+      type: MaterialType.transparency,
+      child: Stack(
+        children: [
+          // Мы используем Align/Positioned, чтобы позиционировать тост внизу экрана
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutBack,
+            bottom: _isVisible ? 50 : -150, // Выезжает снизу
+            left: 20,
+            right: 20,
+            child: Center(
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 400),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E1E).withOpacity(0.90), // Темный фон
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: const Color(0xFFFF453A).withOpacity(0.5), // Красная обводка
+                    width: 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.5),
+                      blurRadius: 15,
+                      offset: const Offset(0, 4),
+                    )
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Иконка (показываем специальную иконку для хука мишени)
+                    if (_currentMessage.startsWith("🎯"))
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 4),
+                        child: Icon(Icons.data_object, color: Color(0xFFFF453A), size: 20),
+                      ),
+                    Text(
+                      _currentMessage,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        fontFamily: 'Roboto',
+                        height: 1.3,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
