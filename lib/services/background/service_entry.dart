@@ -89,9 +89,12 @@ void onStart(ServiceInstance service) async {
       // Используем цепочку трансформаций для корректного чтения строк
       client
           .cast<List<int>>()
-          .transform(utf8.decoder)       // Байти -> Строка
+      // FIX: allowMalformed: true позволяет игнорировать ошибки декодирования
+      // (например, обрезанные эмодзи или бинарный мусор), предотвращая краш сервиса.
+          .transform(Utf8Decoder(allowMalformed: true))
           .transform(const LineSplitter()) // Разбиваем по \n (построчно)
           .listen((String line) {
+
         String decoded = line.trim();
         if (decoded.isEmpty) return;
 
@@ -114,7 +117,8 @@ void onStart(ServiceInstance service) async {
         }
 
         // В) Фильтр по длине (менее 40 символов не шлем)
-        // Это отсечет короткий мусор и пустые JSON, если они есть
+        // Это отсечет короткий мусор и пустые JSON, если они есть.
+        // ВНИМАНИЕ: Если есть важные пакеты короче 40 символов, уменьшите это число.
         if (messageToSend.length < 40) {
           forwardToRemote = false;
         }
